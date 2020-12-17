@@ -15,9 +15,6 @@ const Player = require('./player.js');
 // Словарь/карта всех текущих игр
 const games = {};
 
-// Глобальный генератор событий
-const eventEmitter = new EventEmitter();
-
 io.on('connection', (socket) => {
   /**
    * Создание новой игры
@@ -98,6 +95,9 @@ io.on('connection', (socket) => {
     });
   });
 });
+
+// Глобальный генератор событий
+const eventEmitter = new EventEmitter();
 
 // Каждый nextTick:
 //   1. Делаем следующий ход в каждой игре
