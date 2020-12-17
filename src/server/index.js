@@ -5,14 +5,18 @@ const io = require('socket.io')(http, {
     origin: '*',
   },
 });
+const EventEmitter = require('events');
 
 // Классы
 const Game = require('./game.js');
 const Player = require('./player.js');
 // const Piece = require('./piece.js');
 
-// Не придумал ничего лучше, кроме как держать словарь/карту всех текущих игр
+// Словарь/карта всех текущих игр
 const games = {};
+
+// Глобальный генератор событий
+const eventEmitter = new EventEmitter();
 
 io.on('connection', (socket) => {
   /**
@@ -21,24 +25,25 @@ io.on('connection', (socket) => {
   socket.on('new game', () => {
     const id = `game#${socket.id}`;
 
-    // Если не закрыта предыдущая сессия, вернуть Bad Request
+    // Если не закрыта предыдущая сессия, вернуть BadRequest
     if (games[id]) {
       socket.emit('new game', {
+        id,
         message: 'Previous session not closed',
         status: 400,
       });
       return;
     }
 
-    // Создать игру
-    const game = new Game();
-    games[id] = game;
+    // Создать сессию и добавить в карту игр
+    games[id] = new Game(io, id);
 
-    // Создать нового игрока
-    const player = new Player();
-    game.addPlayer(player);
-
-    // Добавить игрока в текущую игру
+    // Сообщить об успешном создании игры
+    socket.emit('new game', {
+      id,
+      message: 'Game session created successfully',
+      status: 200,
+    });
   });
 
   /**
@@ -47,9 +52,10 @@ io.on('connection', (socket) => {
   socket.on('join game', (message) => {
     const { id } = message;
 
-    // Если игры с таким id не существует, не пускать и вернуть Bad Request
+    // Если игры с таким id не существует, вернуть BadRequest
     if (!games[id]) {
       socket.emit('join game', {
+        id,
         message: 'No such game',
         status: 400,
       });
@@ -59,13 +65,28 @@ io.on('connection', (socket) => {
     // Если игрок уже в игре, вернуть BadRequest
     if (socket.rooms[id]) {
       socket.emit('join game', {
+        id,
         message: 'Already joined',
         status: 400,
       });
     }
 
-    // Создать игрока
-    // Добавить игрока в текущую игру
+    // Добавить игрока в сессию или сообщить, что комната заполнена
+    const success = games[id].addPlayer(new Player(socket));
+    if (!success) {
+      socket.emit('join game', {
+        id,
+        message: 'Room full',
+        status: 400,
+      });
+    }
+
+    // Сообщить об успешном входе
+    socket.emit('join game', {
+      id,
+      message: 'Joined game session successfully',
+      status: 200,
+    });
   });
 
   /**
@@ -77,5 +98,22 @@ io.on('connection', (socket) => {
     });
   });
 });
+
+// Каждый nextTick:
+//   1. Делаем следующий ход в каждой игре
+//   2. Удаляем законченные сессии
+eventEmitter.on('nextTick', () => {
+  Object.values(games).forEach((game) => {
+    game.nextTick();
+    if (!game.isActive) {
+      delete games[game.id];
+    }
+  });
+});
+
+// Генератор тиков
+setInterval(() => {
+  eventEmitter.emit('nextTick');
+}, 1000);
 
 http.listen(5000);
